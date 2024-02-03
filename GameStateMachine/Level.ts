@@ -191,6 +191,9 @@ export class Level {
 		} else if (branch.levelState == levelState.END_LEVEL) {
 			this.events._triggerLevelExit();
 		}
+
+		this.levelTick = branch.levelTick;
+		this.stateTick = branch.stateTick;
 		this.branchDatabase.updateObject(branch);
 	}
 }

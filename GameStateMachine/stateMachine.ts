@@ -14,6 +14,9 @@ class StateMachine {
 	private activeBranches: Set<Branch>; // Tracks the active branches
 	private defaultActiveBranches: Set<Branch>; // Tracks the default active branches
 
+	private resetFunctions: (() => void)[]; // Functions to call when the state machine is reset
+	private tickFunctions: (() => void)[]; // Functions to call when the state machine ticks
+
 	private static readonly RESET_EVENT = `${NAMESPACE}:reset`;
 
 	/**
@@ -34,6 +37,10 @@ class StateMachine {
 
 		mc.world.getAllPlayers().forEach((player) => {
 			this.onPlayerJoinServer(player);
+		});
+
+		this.resetFunctions.forEach((callback) => {
+			callback();
 		});
 	}
 
@@ -57,7 +64,12 @@ class StateMachine {
 				});
 			}
 		});
-		this.debugPlayers();
+
+		this.tickFunctions.forEach((callback) => {
+			callback();
+		});
+
+		//this.debugPlayers();
 		//this.debugBranches();
 	}
 
@@ -135,6 +147,10 @@ class StateMachine {
 		this.playerDB.updateObject(object);
 	}
 
+	/**
+	 *
+	 * Debug function to display the players' state in the action bar.
+	 */
 	private debugPlayers() {
 		let data: { playerName: string; branch: string; level: string; state: string }[] = [];
 
@@ -164,6 +180,9 @@ class StateMachine {
 		mc.world.getDimension(mc.MinecraftDimensionTypes.overworld).runCommand(`title @a actionbar ${formattedData.join("\n")}`);
 	}
 
+	/**
+	 * Debug function to display the branches' state in the action bar.
+	 */
 	private debugBranches() {
 		let data: { branch: string; level: string; state: string }[] = [];
 
@@ -211,7 +230,7 @@ class StateMachine {
 		const [currentLevel, currentLevelID] = branch.getActiveLevel();
 
 		if (currentLevel) {
-			if (newState === playerState.EXIT_PLAYER) {
+			if (newState === playerState.EXIT_PLAYER && playerObject.playerState !== newState) {
 				currentLevel.events._triggerPlayerJoinLevel(player);
 			} else if (newState === playerState.SETUP_PLAYER) {
 				const currentIndex = parseInt(currentLevel.identifier.split(":")[1].split("_")[1]);
@@ -243,8 +262,10 @@ class StateMachine {
 		this.branchDB = new StateMachineDatabase("stateMachine");
 		this.playerDB = new PlayerDatabase("playerDB");
 		this.defaultActiveBranches = new Set();
+		this.resetFunctions = [];
+		this.tickFunctions = [];
 
-		mc.system.runInterval(() => this.tick(), 1);
+		mc.system.runInterval(() => this.tick());
 		mc.system.afterEvents.scriptEventReceive.subscribe((event) => {
 			if (event.id == StateMachine.RESET_EVENT) {
 				this.reset();
@@ -302,6 +323,22 @@ class StateMachine {
 	 */
 	deactivateBranch(branch: Branch) {
 		this.activeBranches.delete(branch);
+	}
+
+	/**
+	 * Registers a function to call when the state machine is reset.
+	 * @param callback The function to call when the state machine is reset.
+	 */
+	onReset(callback: () => void) {
+		this.resetFunctions.push(callback);
+	}
+
+	/**
+	 * Registers a function to call when the state machine ticks.
+	 * @param callback The function to call when the state machine ticks.
+	 */
+	onTick(callback: () => void) {
+		this.tickFunctions.push(callback);
 	}
 }
 
