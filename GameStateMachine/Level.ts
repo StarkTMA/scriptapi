@@ -1,197 +1,166 @@
-import { StateMachineDatabase } from "./Database.js";
+import { BranchDatabase } from "./database.js";
+import { BranchObject, PlayerObject, levelState, playerState } from "./interfaces.js";
 import * as mc from "@minecraft/server";
-import { BranchObject, PlayerObject, levelState, playerState } from "./Interfaces.js";
 
-class Event {
-	private __onLevelLoad: (() => void)[];
-	private __levelLoop: (() => void)[];
-	private __onLevelExit: (() => void)[];
+class Events {
+	public onLevelLoad: (() => void)[];
+	public levelLoop: (() => void)[];
+	public onLevelExit: (() => void)[];
 
-	private __onPlayerJoinLevel: ((player: mc.Player) => void)[];
-	private __onPlayerRespawn: ((player: mc.Player) => void)[];
-	private __onPlayerDied: ((player: mc.Player) => void)[];
-	private __onPlayerLeaveLevel: ((player: mc.Player) => void)[];
+	public onPlayerJoinLevel: ((player: mc.Player) => void)[];
+	public onPlayerRespawn: ((player: mc.Player) => void)[];
+	public onPlayerDeath: ((player: mc.Player) => void)[];
+	public onPlayerLeaveLevel: ((player: mc.Player) => void)[];
 
-	private __onPlayerJoinServer: ((player: mc.Player) => void)[];
-	private __onPlayerLeaveServer: ((player: mc.Player) => void)[];
+	public onPlayerJoinServer: ((player: mc.Player) => void)[];
+	public onPlayerLeaveServer: ((player: mc.Player) => void)[];
 
 	constructor() {
-		this.__onLevelLoad = [];
-		this.__levelLoop = [];
-		this.__onLevelExit = [];
+		this.onLevelLoad = [];
+		this.levelLoop = [];
+		this.onLevelExit = [];
 
-		this.__onPlayerJoinLevel = [];
-		this.__onPlayerRespawn = [];
-		this.__onPlayerDied = [];
-		this.__onPlayerLeaveLevel = [];
+		this.onPlayerJoinLevel = [];
+		this.onPlayerRespawn = [];
+		this.onPlayerDeath = [];
+		this.onPlayerLeaveLevel = [];
 
-		this.__onPlayerJoinServer = [];
-		this.__onPlayerLeaveServer = [];
+		this.onPlayerJoinServer = [];
+		this.onPlayerLeaveServer = [];
 	}
 
-	_triggerLevelLoad() {
-		for (const func of this.__onLevelLoad) {
-			func();
-		}
+	triggerLevelLoad() {
+		this.onLevelLoad.forEach((func) => func());
 	}
 
-	_triggerLevelLoop() {
-		for (const func of this.__levelLoop) {
-			func();
-		}
+	triggerLevelLoop() {
+		this.levelLoop.forEach((func) => func());
 	}
 
-	_triggerLevelExit() {
-		for (const func of this.__onLevelExit) {
-			func();
-		}
+	triggerLevelExit() {
+		this.onLevelExit.forEach((func) => func());
 	}
 
-	_triggerPlayerJoinServer(player: mc.Player) {
-		for (const func of this.__onPlayerJoinServer) {
-			func(player);
-		}
+	triggerPlayerJoinServer(player: mc.Player) {
+		this.onPlayerJoinServer.forEach((func) => func(player));
 	}
 
-	_triggerPlayerLeaveServer(player: mc.Player) {
-		for (const func of this.__onPlayerLeaveServer) {
-			func(player);
-		}
+	triggerPlayerLeaveServer(player: mc.Player) {
+		this.onPlayerLeaveServer.forEach((func) => func(player));
 	}
 
-	_triggerPlayerJoinLevel(player: mc.Player) {
-		for (const func of this.__onPlayerJoinLevel) {
-			func(player);
-		}
+	triggerPlayerJoinLevel(player: mc.Player) {
+		this.onPlayerJoinLevel.forEach((func) => func(player));
 	}
 
-	_triggerPlayerLeaveLevel(player: mc.Player) {
-		for (const func of this.__onPlayerLeaveLevel) {
-			func(player);
-		}
+	triggerPlayerLeaveLevel(player: mc.Player) {
+		this.onPlayerLeaveLevel.forEach((func) => func(player));
 	}
 
-	_triggerPlayerRespawn(player: mc.Player) {
-		for (const func of this.__onPlayerRespawn) {
-			func(player);
-		}
+	triggerPlayerRespawn(player: mc.Player) {
+		this.onPlayerRespawn.forEach((func) => func(player));
 	}
 
-	_triggerPlayerDied(player: mc.Player) {
-		for (const func of this.__onPlayerDied) {
-			func(player);
-		}
+	triggerPlayerDeath(player: mc.Player) {
+		this.onPlayerDeath.forEach((func) => func(player));
+	}
+}
+
+class EventsRegistry {
+	private events: Events;
+
+	constructor(events: Events) {
+		this.events = events;
 	}
 
 	onLevelLoad(callback: () => void) {
-		this.__onLevelLoad.push(callback);
+		this.events.onLevelLoad.push(callback);
 	}
 
-	levelLoop(callback: () => void) {
-		this.__levelLoop.push(callback);
+	onLevelLoop(callback: () => void) {
+		this.events.levelLoop.push(callback);
 	}
 
 	onLevelExit(callback: () => void) {
-		this.__onLevelExit.push(callback);
+		this.events.onLevelExit.push(callback);
 	}
 
 	onPlayerJoinServer(callback: (player: mc.Player) => void) {
-		this.__onPlayerJoinServer.push(callback);
+		this.events.onPlayerJoinServer.push(callback);
 	}
 
 	onPlayerLeaveServer(callback: (player: mc.Player) => void) {
-		this.__onPlayerLeaveServer.push(callback);
+		this.events.onPlayerLeaveServer.push(callback);
 	}
 
 	onPlayerJoinLevel(callback: (player: mc.Player) => void) {
-		this.__onPlayerJoinLevel.push(callback);
+		this.events.onPlayerJoinLevel.push(callback);
 	}
 
 	onPlayerLeaveLevel(callback: (player: mc.Player) => void) {
-		this.__onPlayerLeaveLevel.push(callback);
+		this.events.onPlayerLeaveLevel.push(callback);
 	}
 
 	onPlayerRespawn(callback: (player: mc.Player) => void) {
-		this.__onPlayerRespawn.push(callback);
+		this.events.onPlayerRespawn.push(callback);
 	}
 
-	onPlayerDied(callback: (player: mc.Player) => void) {
-		this.__onPlayerDied.push(callback);
+	onPlayerDeath(callback: (player: mc.Player) => void) {
+		this.events.onPlayerDeath.push(callback);
 	}
 }
 
 export class Level {
-	private levelId: string;
-	private branchId: string;
-	private branchDatabase: StateMachineDatabase;
-	private index: number;
-	private levelTick: number;
-	private stateTick: number;
-	public events: Event;
+	private branchIdentifier: string;
+	private branchDatabase: BranchDatabase;
 
-	constructor(levelId: string, branchId: string, branchDatabase: StateMachineDatabase, index: number) {
-		this.levelId = levelId;
-		this.branchId = branchId;
-		this.branchDatabase = branchDatabase;
-		this.index = index;
-		this.events = new Event();
+	public identifier: string;
+	public levelIndex: number;
+	public levelTick: number;
+	public stateTick: number;
 
-		let object = this.getObject();
+	public eventTrigger: Events;
+	public events: EventsRegistry;
 
-		this.levelTick = object.levelTick;
-		this.stateTick = object.stateTick;
-	}
+	constructor(identifier: string, branchIdentifier: string, levelIndex: number) {
+		this.identifier = `${branchIdentifier}_${identifier}`;
+		this.branchIdentifier = branchIdentifier;
+		this.branchDatabase = BranchDatabase.getInstance();
+		this.levelIndex = levelIndex;
+		this.levelTick = 0;
+		this.stateTick = 0;
 
-	get identifier(): string {
-		return this.levelId;
-	}
-
-	get levelIndex(): number {
-		return this.index;
-	}
-
-	get levelState(): levelState {
-		return this.branchDatabase.getObject(this.branchId).levelState;
-	}
-
-	private getObject(): BranchObject {
-		return this.branchDatabase.getObject(this.branchId);
-	}
-
-	get getLevelTick(): number {
-		return this.levelTick;
-	}
-
-	get getStateTick(): number {
-		return this.stateTick;
+		this.eventTrigger = new Events();
+		this.events = new EventsRegistry(this.eventTrigger);
 	}
 
 	nextState() {
-		let branch: BranchObject = this.getObject();
+		let branch: BranchObject = this.branchDatabase.getObject(this.branchIdentifier)!;
 
-		if (branch.levelState == levelState.INIT_LEVEL) {
-			branch.levelState = levelState.LOOP;
+		if (branch.levelState == levelState.END_LEVEL) {
+			branch.levelState = levelState.COMPLETED;
 		} else if (branch.levelState == levelState.LOOP) {
 			branch.levelState = levelState.END_LEVEL;
-		} else if (branch.levelState == levelState.END_LEVEL) {
-			branch.levelState = levelState.COMPLETED;
+		} else if (branch.levelState == levelState.INIT_LEVEL) {
+			branch.levelState = levelState.LOOP;
 		}
+
 		branch.stateTick = 0;
 
 		this.branchDatabase.updateObject(branch);
 	}
 
 	tick() {
-		let branch: BranchObject = this.getObject();
+		let branch: BranchObject = this.branchDatabase.getObject(this.branchIdentifier)!;
+
 		branch.stateTick++;
 		if (branch.levelState == levelState.INIT_LEVEL) {
-			this.events._triggerLevelLoad();
+			this.eventTrigger.triggerLevelLoad();
 		} else if (branch.levelState == levelState.LOOP) {
-			this.events._triggerLevelLoop();
+			this.eventTrigger.triggerLevelLoop();
 		} else if (branch.levelState == levelState.END_LEVEL) {
-			this.events._triggerLevelExit();
+			this.eventTrigger.triggerLevelExit();
 		}
-
 		this.levelTick = branch.levelTick;
 		this.stateTick = branch.stateTick;
 		this.branchDatabase.updateObject(branch);

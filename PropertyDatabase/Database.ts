@@ -1,17 +1,18 @@
 import { Entity, world, World } from "@minecraft/server";
 import { NAMESPACE } from "../constants";
+import { SimpleObject } from "./interfaces";
 
 /**
- * DatabaseManager is a class that manages JSON databases stored in Minecraft's world properties.
+ * DatabaseManager is a class that manages databases stored in Minecraft's world properties.
+ * Currently only supports JSON databases.
  */
 class DatabaseManager {
 	private target: Entity | World;
 
 	constructor(target: Entity | undefined) {
-		if (target instanceof Entity){
+		if (target instanceof Entity) {
 			this.target = target;
-		}
-		else {
+		} else {
 			this.target = world;
 		}
 	}
@@ -60,43 +61,36 @@ class DatabaseManager {
 }
 
 /**
- * SimpleObject is an interface for objects with an id property.
- */
-export interface SimpleObject {
-	id: string;
-}
-
-/**
  * SimpleDatabase is a base class for databases that store custom objects with an id property.
- * This class is not meant to be used directly, but rather extended.
- * @example
- * MyObject extends SimpleObject {
- *  id: string;
- *  name: string;
- *  location: number[];
- * }
+ * It provides methods for adding, updating, removing and retrieving objects from the database.
+ * A singleton pattern is used to ensure that only one instance of the database exists.
  *
- * class MyDatabase extends SimpleDatabase {
- *    constructor() {
- *       super("my_database");
- *    }
- *    addObject(object: MyObject) {
- *       super.addObject(object);
- *    }
- * }
+ * @example
+ * class MyDatabase extends SimpleDatabase<PlayerObject> {
+ * 	protected static instance: MyDatabase;
+ * 	constructor() {
+ * 		super("myDatabase", undefined);
+ * 	}
+ *
+ * 	static getInstance(): MyDatabase {
+ * 		if (!MyDatabase.instance) {
+ * 			MyDatabase.instance = new MyDatabase();
+ * 		}
+ * 		return MyDatabase.instance;
+ * 	}
  */
-export class SimpleDatabase {
+export class SimpleDatabase<T extends SimpleObject> {
 	private databaseName: string;
 	private mainDB: DatabaseManager;
-	private localDB: SimpleObject[] | any[];
+	private localDB: T[];
 
 	/**
 	 * The constructor initializes the local database and syncs it with the main database.
 	 * @param databaseName The name of the database.
 	 * @param target The target entity to store the database in. If undefined, the database is stored in the world.
 	 */
-	constructor(databaseName: string, target: Entity | undefined) {
-		this.mainDB = new DatabaseManager(target)
+	protected constructor(databaseName: string, target: Entity | undefined) {
+		this.mainDB = new DatabaseManager(target);
 		this.databaseName = databaseName;
 
 		if (this.mainDB.hasJSONDatabase(this.databaseName)) {
@@ -129,7 +123,7 @@ export class SimpleDatabase {
 	 * Adds an object to the local database and updates the main database.
 	 * @param object The object to be added.
 	 */
-	protected addObject(object: SimpleObject) {
+	addObject(object: T): void {
 		this.localDB.push(object);
 		this.updateMainDB();
 	}
@@ -139,7 +133,7 @@ export class SimpleDatabase {
 	 * If the object does not exist, it is added.
 	 * @param object The object to be updated.
 	 */
-	protected updateObject(object: SimpleObject) {
+	updateObject(object: T): void {
 		if (this.hasObject(object.id)) {
 			this.removeObject(object.id);
 		}
@@ -151,7 +145,7 @@ export class SimpleDatabase {
 	 * @param id The id of the object.
 	 * @returns True if the object exists, false otherwise.
 	 */
-	hasObject(id: string) {
+	hasObject(id: string): boolean {
 		return this.localDB.map((object) => object.id).includes(id);
 	}
 
@@ -160,7 +154,7 @@ export class SimpleDatabase {
 	 * @param id The id of the object.
 	 * @returns The object if it exists, undefined otherwise.
 	 */
-	getObject(id: string) {
+	getObject(id: string): T | undefined {
 		return this.localDB.filter((object) => object.id === id)[0];
 	}
 
@@ -168,7 +162,7 @@ export class SimpleDatabase {
 	 * Removes an object with the given id from the local database and updates the main database.
 	 * @param id The id of the object.
 	 */
-	removeObject(id: string) {
+	removeObject(id: string): void {
 		this.localDB = this.localDB.filter((object) => object.id !== id);
 		this.updateMainDB();
 	}
@@ -177,14 +171,14 @@ export class SimpleDatabase {
 	 * Retrieves all objects from the local database.
 	 * @returns An array of all objects in the local database.
 	 */
-	getAllObjects() {
+	getAllObjects(): T[] {
 		return this.localDB;
 	}
 
 	/**
 	 * Removes all objects from the local database and updates the main database.
 	 */
-	eraseAllObjects() {
+	eraseAllObjects(): void {
 		this.localDB = [];
 		this.updateMainDB();
 	}
@@ -193,7 +187,7 @@ export class SimpleDatabase {
 	 * Iterates over all objects in the local database.
 	 * @param callback The function to be called for each object.
 	 */
-	forEach(callback: (object: SimpleObject, index: number) => void) {
+	forEach(callback: (object: SimpleObject, index: number) => void): void {
 		this.localDB.forEach((object, index) => callback(object, index));
 	}
 }

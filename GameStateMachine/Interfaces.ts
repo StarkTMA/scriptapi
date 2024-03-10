@@ -12,7 +12,7 @@ export enum playerState {
 
 export interface BranchObject {
 	id: string;
-	activeLevel: string;
+	activeLevel: string | undefined;
 	levelState: levelState;
 	levelTick: number;
 	stateTick: number;

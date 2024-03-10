@@ -1,151 +1,54 @@
 import * as mc from "@minecraft/server";
-import { StateMachineDatabase, PlayerDatabase } from "./Database";
-import { PlayerObject, levelState, playerState } from "./Interfaces";
-import { Branch } from "./Branch";
-import { Level } from "./Level";
+import { BranchDatabase, PlayerDatabase } from "./database";
+import { PlayerObject, levelState, playerState } from "./interfaces";
+import { Branch } from "./branch";
 import { NAMESPACE } from "../constants";
+import { Level } from "./level";
 
-// TODO: add a migrate function to jump between branches and levels.
+const RESET_EVENT = `${NAMESPACE}:reset`;
+const JUMP_EVENT = `${NAMESPACE}:jump`;
 
-class StateMachine {
-	private branchDB: StateMachineDatabase; // Tracks the branches registered in the world. Saved to world
-	private playerDB: PlayerDatabase; // Tracks the levels state of the players. Saved to player
-	private branches: Map<string, Branch>; // Registers branches in the world
-	private activeBranches: Set<Branch>; // Tracks the active branches
-	private defaultActiveBranches: Set<Branch>; // Tracks the default active branches
+class StateMachineEvents {
+	public resetFunctions: (() => void)[]; // Functions to call when the state machine is reset
+	public tickFunctions: (() => void)[]; // Functions to call when the state machine ticks
 
-	private resetFunctions: (() => void)[]; // Functions to call when the state machine is reset
-	private tickFunctions: (() => void)[]; // Functions to call when the state machine ticks
+	constructor() {
+		this.resetFunctions = [];
+		this.tickFunctions = [];
+	}
 
-	private static readonly RESET_EVENT = `${NAMESPACE}:reset`;
-
-	/**
-	 * Resets the state machine.
-	 */
-	private reset() {
-		this.branchDB.eraseAllObjects();
-		this.playerDB.eraseAllObjects();
-		this.activeBranches.clear();
-
-		this.branches.forEach((branch) => {
-			branch.resetBranch();
-		});
-
-		this.defaultActiveBranches.forEach((branch) => {
-			this.activateBranch(branch);
-		});
-
-		mc.world.getAllPlayers().forEach((player) => {
-			this.onPlayerJoinServer(player);
-		});
-
+	triggerReset() {
 		this.resetFunctions.forEach((callback) => {
 			callback();
 		});
 	}
 
-	/**
-	 * Ticks the active branches.
-	 * If a branch has no active levels, it is deactivated.
-	 */
-	private tick() {
-		this.activeBranches.forEach((branch) => {
-			branch.tick();
-			const [activeLevel, activeLevelIdentifier] = branch.getActiveLevel();
-			if (!activeLevel) {
-				this.deactivateBranch(branch);
-			} else {
-				mc.world.getAllPlayers().forEach((player) => {
-					if (activeLevel.levelState === levelState.INIT_LEVEL) {
-						this.updatePlayerState(player, playerState.EXIT_PLAYER);
-					} else if (activeLevel.levelState === levelState.COMPLETED) {
-						this.updatePlayerState(player, playerState.SETUP_PLAYER);
-					}
-				});
-			}
-		});
-
+	triggerTick() {
 		this.tickFunctions.forEach((callback) => {
 			callback();
 		});
+	}
+}
 
-		//this.debugPlayers();
-		//this.debugBranches();
+class StateMachineEventRegister {
+	private events: StateMachineEvents;
+
+	constructor(events: StateMachineEvents) {
+		this.events = events;
 	}
 
-	/**
-	 * Called when a player joins the server.
-	 * @param player The player that joined the server.
-	 */
-	private onPlayerJoinServer(player: mc.Player) {
-		const playerObject = this.getPlayerObject(player.id);
-		const branch = this.branches.get(playerObject.branch) ?? mainBranch;
-		const [currentLevel, currentLevelID] = branch.getActiveLevel();
-
-		if (!currentLevel || !this.activeBranches.has(branch)) {
-			playerObject.branch = mainBranch.identifier;
-			playerObject.playerLevel = mainLevel0.identifier;
-			playerObject.playerState = playerState.SETUP_PLAYER;
-			this.playerDB.updateObject(playerObject);
-		} else {
-			this.updatePlayerState(player, playerObject.playerLevel === currentLevelID ? playerState.EXIT_PLAYER : playerState.SETUP_PLAYER);
-			currentLevel.events._triggerPlayerJoinServer(player);
-		}
+	onReset(callback: () => void) {
+		this.events.resetFunctions.push(callback);
 	}
 
-	/**
-	 * Called when a player leaves the server.
-	 * @param player The player that left the server.
-	 */
-	private onPlayerLeaveServer(player: mc.Player) {
-		const object = this.getPlayerObject(player.id);
-		const branch = this.branches.get(object.branch);
-
-		if (branch && this.activeBranches.has(branch)) {
-			const [level, levelID] = branch.getActiveLevel();
-			if (level) {
-				level.events._triggerPlayerLeaveServer(player);
-			}
-		}
-
-		this.playerDB.updateObject(object);
+	onTick(callback: () => void) {
+		this.events.tickFunctions.push(callback);
 	}
+}
 
-	/**
-	 * Called when a player respawns.
-	 * @param player The player that respawned.
-	 */
-	private onPlayerRespawn(player: mc.Player) {
-		const object = this.getPlayerObject(player.id);
-		const branch = this.branches.get(object.branch);
-
-		if (branch && this.activeBranches.has(branch)) {
-			const [level, levelID] = branch.getActiveLevel();
-			if (level) {
-				level.events._triggerPlayerRespawn(player);
-			}
-		}
-
-		this.playerDB.updateObject(object);
-	}
-
-	/**
-	 * Called when a player dies.
-	 * @param player The player that died.
-	 */
-	private onPlayerDied(player: mc.Player) {
-		const object = this.getPlayerObject(player.id);
-		const branch = this.branches.get(object.branch);
-
-		if (branch && this.activeBranches.has(branch)) {
-			const [level, levelID] = branch.getActiveLevel();
-			if (level) {
-				level.events._triggerPlayerDied(player);
-			}
-		}
-
-		this.playerDB.updateObject(object);
-	}
+class PlayerManager {
+	private playerDatabase: PlayerDatabase = PlayerDatabase.getInstance();
+	private players: Map<string, mc.Player> = new Map();
 
 	/**
 	 *
@@ -160,7 +63,7 @@ class StateMachine {
 
 		const players = mc.world.getAllPlayers();
 		for (const player of players) {
-			const playerObject = this.getPlayerObject(player.id);
+			const playerObject = this.playerDatabase.getObject(player.id)!;
 			data.push({
 				playerName: player.nameTag,
 				branch: playerObject.branch,
@@ -180,114 +83,151 @@ class StateMachine {
 		mc.world.getDimension(mc.MinecraftDimensionTypes.overworld).runCommand(`title @a actionbar ${formattedData.join("\n")}`);
 	}
 
-	/**
-	 * Debug function to display the branches' state in the action bar.
-	 */
-	private debugBranches() {
-		let data: { branch: string; level: string; state: string }[] = [];
-
-		let longestBranchName = 0;
-		let longestLevelName = 0;
-
-		this.branches.forEach((branch) => {
-			const [level, levelID] = branch.getActiveLevel();
-			data.push({
-				branch: branch.identifier,
-				level: levelID,
-				state: level?.levelState ?? "No active levels",
-			});
-			longestBranchName = Math.max(longestBranchName, branch.identifier.length);
-			longestLevelName = Math.max(longestLevelName, levelID.length);
-		});
-
-		let formattedData = data.map((branch) => {
-			return `§a${branch.branch.padEnd(longestBranchName)}§r | §6${branch.level.padEnd(longestLevelName)}§r | §3${branch.state}§r`;
-		});
-		mc.world.getDimension(mc.MinecraftDimensionTypes.overworld).runCommand(`title @a actionbar ${formattedData.join("\n")}`);
-	}
-
-	/**
-	 * Gets the player object from the playerDB using the player's id.
-	 * @param id The player's id.
-	 * @returns The player object.
-	 */
-	private getPlayerObject(id: string): PlayerObject {
-		const pDB = this.playerDB.getObject(id);
-		if (!pDB) {
-			this.playerDB.addObject({
-				id: id,
+	private registerNewPlayer(player: mc.Player) {
+		if (!this.playerDatabase.hasObject(player.id)) {
+			this.playerDatabase.addObject({
+				id: player.id,
 				branch: mainBranch.identifier,
 				playerLevel: mainLevel0.identifier,
 				playerState: playerState.SETUP_PLAYER,
 			});
 		}
-		return this.playerDB.getObject(id);
 	}
 
-	private updatePlayerState(player: mc.Player, newState: playerState) {
-		const playerObject = this.getPlayerObject(player.id);
-		const branch = this.branches.get(playerObject.branch) ?? mainBranch;
-		const [currentLevel, currentLevelID] = branch.getActiveLevel();
+	private updatePlayerState(currentLevel: Level, player: mc.Player, playerObject: PlayerObject, branch: Branch) {
+		if (playerObject.playerLevel === currentLevel.identifier && playerObject.playerState === playerState.SETUP_PLAYER) {
+			currentLevel.eventTrigger.triggerPlayerJoinLevel(player);
+			playerObject.playerState = playerState.EXIT_PLAYER;
+		} else if (playerObject.playerLevel !== currentLevel.identifier) {
+			const levels = Array.from(branch.getLevels());
 
-		if (currentLevel) {
-			if (newState === playerState.EXIT_PLAYER && playerObject.playerState !== newState) {
-				currentLevel.events._triggerPlayerJoinLevel(player);
-			} else if (newState === playerState.SETUP_PLAYER) {
-				const currentIndex = parseInt(currentLevel.identifier.split(":")[1].split("_")[1]);
-				const playerIndex = parseInt(playerObject.playerLevel.split(":")[1].split("_")[1]);
+			const currentIndex = currentLevel.levelIndex;
+			const playerIndex = levels.findIndex((level) => level[0] === playerObject.playerLevel);
 
-				if (currentIndex !== playerIndex) {
-					for (let i = playerIndex; i < currentIndex; i++) {
-						const levelToExit = branch.getLevel(`${branch.identifier}_${i}`);
-						const levelToEnter = branch.getLevel(`${branch.identifier}_${i + 1}`);
+			if (currentIndex !== playerIndex) {
+				for (let i = playerIndex; i < currentIndex; i++) {
+					const levelToExit = branch.getLevel(levels[i][0]);
+					const levelToEnter = branch.getLevel(levels[i + 1][0]);
 
-						levelToExit?.events._triggerPlayerLeaveLevel(player);
-						levelToEnter?.events._triggerPlayerJoinLevel(player);
-					}
-				} else {
-					currentLevel.events._triggerPlayerLeaveLevel(player);
+					levelToExit?.eventTrigger.triggerPlayerLeaveLevel(player);
+					levelToEnter?.eventTrigger.triggerPlayerJoinLevel(player);
 				}
-			}
-
-			playerObject.playerState = newState;
-			playerObject.playerLevel = currentLevelID;
-		}
-
-		this.playerDB.updateObject(playerObject);
-	}
-
-	constructor() {
-		this.branches = new Map();
-		this.activeBranches = new Set();
-		this.branchDB = new StateMachineDatabase("stateMachine");
-		this.playerDB = new PlayerDatabase("playerDB");
-		this.defaultActiveBranches = new Set();
-		this.resetFunctions = [];
-		this.tickFunctions = [];
-
-		mc.system.runInterval(() => this.tick());
-		mc.system.afterEvents.scriptEventReceive.subscribe((event) => {
-			if (event.id == StateMachine.RESET_EVENT) {
-				this.reset();
-			}
-		});
-		mc.world.beforeEvents.playerLeave.subscribe((event) => {
-			this.onPlayerLeaveServer(event.player);
-		});
-		mc.world.afterEvents.playerSpawn.subscribe((event) => {
-			if (event.initialSpawn) {
-				this.onPlayerJoinServer(event.player);
 			} else {
-				this.onPlayerRespawn(event.player);
+				currentLevel.eventTrigger.triggerPlayerLeaveLevel(player);
 			}
-		});
-		mc.world.afterEvents.entityDie.subscribe(
-			(event) => {
-				this.onPlayerDied(event.deadEntity as mc.Player);
-			},
-			{ entityTypes: ["minecraft:player"] }
-		);
+			playerObject.playerState = playerState.SETUP_PLAYER;
+			playerObject.playerLevel = currentLevel.identifier;
+		}
 	}
+
+	/**
+	 * Resets the player database.
+	 */
+	public reset() {
+		this.playerDatabase.eraseAllObjects();
+
+		mc.world.getAllPlayers().forEach((player) => {
+			this.registerNewPlayer(player);
+		});
+	}
+
+	/**
+	 * Called when a player joins the server.
+	 * If a player does not exist on the database, it will be added to the main branch.
+	 * @param player The player that joined the server.
+	 */
+	public onPlayerJoinServer(player: mc.Player, branches: { branches: Map<string, Branch>; activeBranches: Set<Branch> }) {
+		this.registerNewPlayer(player);
+
+		this.players.set(player.id, player);
+
+		const playerObject = this.playerDatabase.getObject(player.id)!;
+		const branch = branches.branches.get(playerObject.branch)!;
+		const currentLevel = branch.getActiveLevel();
+
+		if (!currentLevel || !branches.activeBranches.has(branch)) {
+			playerObject.branch = mainBranch.identifier;
+			playerObject.playerLevel = mainLevel0.identifier;
+			playerObject.playerState = playerState.SETUP_PLAYER;
+			mainLevel0.eventTrigger.triggerPlayerJoinServer(player);
+		} else {
+			currentLevel.eventTrigger.triggerPlayerJoinServer(player);
+			this.updatePlayerState(currentLevel, player, playerObject, branch);
+		}
+		this.playerDatabase.updateObject(playerObject);
+	}
+
+	/**
+	 * Called when a player respawns.
+	 * @param player The player that respawned.
+	 */
+	public onPlayerRespawn(player: mc.Player, branches: { branches: Map<string, Branch>; activeBranches: Set<Branch> }) {
+		const playerObject = this.playerDatabase.getObject(player.id)!;
+		const branch = branches.branches.get(playerObject.branch)!;
+		const level = branch.getActiveLevel();
+
+		if (level) {
+			level.eventTrigger.triggerPlayerRespawn(player);
+		}
+	}
+
+	/**
+	 * Called when a player leaves the server.
+	 * @param player The player that left the server.
+	 */
+	public onPlayerLeaveServer(player: mc.Player, branches: { branches: Map<string, Branch>; activeBranches: Set<Branch> }) {
+		this.players.delete(player.id);
+
+		const playerObject = this.playerDatabase.getObject(player.id)!;
+		const branch = branches.branches.get(playerObject.branch)!;
+		const level = branch.getActiveLevel();
+
+		if (level) {
+			level.eventTrigger.triggerPlayerLeaveServer(player);
+		}
+	}
+
+	/**
+	 * Called when a player dies.
+	 * @param player The player that died.
+	 */
+	public onPlayerDeath(player: mc.Player, branches: { branches: Map<string, Branch>; activeBranches: Set<Branch> }) {
+		const playerObject = this.playerDatabase.getObject(player.id)!;
+		const branch = branches.branches.get(playerObject.branch)!;
+		const level = branch.getActiveLevel();
+
+		if (level) {
+			level.eventTrigger.triggerPlayerDeath(player);
+		}
+	}
+
+	public tick(activeBranches: Set<Branch>) {
+		activeBranches.forEach((branch) => {
+			this.playerDatabase
+				.getAllObjects()
+				.filter((player) => player.branch === branch.identifier)
+				.forEach((player) => {
+					const p = this.players.get(player.id);
+					if (p) {
+						this.updatePlayerState(branch.getActiveLevel()!, p, player, branch);
+					}
+				});
+		});
+	}
+}
+
+class StateMachine {
+	private static instance: StateMachine;
+
+	private playersManager: PlayerManager = new PlayerManager();
+
+	private eventTrigger: StateMachineEvents = new StateMachineEvents();
+
+	private branches: Map<string, Branch> = new Map();
+	private activeBranches: Set<Branch> = new Set();
+	private defaultActiveBranches: Set<Branch> = new Set();
+
+	public events: StateMachineEventRegister = new StateMachineEventRegister(this.eventTrigger);
 
 	/**
 	 * Creates a new branch.
@@ -295,13 +235,14 @@ class StateMachine {
 	 * @param activate Whether to activate the branch or not.
 	 * @returns
 	 */
-	createBranch(name: string, activate: boolean = false): Branch {
-		name = NAMESPACE + ":" + name;
-		if (this.branches.has(name)) {
-			throw new Error(`Branch with name ${name} already exists.`);
+	public createBranch(name: string, activate: boolean = false): Branch {
+		const branchIdentifier = `${NAMESPACE}:${name}`;
+		if (this.branches.has(branchIdentifier)) {
+			throw new Error(`Branch with name ${branchIdentifier} already exists. Error at StateMachine.createBranch`);
 		}
-		const branch = new Branch(name, this.branchDB);
-		this.branches.set(name, branch);
+		const branch = new Branch(name);
+		this.branches.set(branchIdentifier, branch);
+
 		if (activate) {
 			this.activateBranch(branch);
 			this.defaultActiveBranches.add(branch);
@@ -313,7 +254,7 @@ class StateMachine {
 	 * Activates a branch.
 	 * @param branch The branch to activate.
 	 */
-	activateBranch(branch: Branch) {
+	public activateBranch(branch: Branch) {
 		this.activeBranches.add(branch);
 	}
 
@@ -321,27 +262,105 @@ class StateMachine {
 	 * Deactivates a branch.
 	 * @param branch The branch to deactivate.
 	 */
-	deactivateBranch(branch: Branch) {
+	public deactivateBranch(branch: Branch) {
 		this.activeBranches.delete(branch);
 	}
 
-	/**
-	 * Registers a function to call when the state machine is reset.
-	 * @param callback The function to call when the state machine is reset.
-	 */
-	onReset(callback: () => void) {
-		this.resetFunctions.push(callback);
+	public static getInstance(): StateMachine {
+		if (!StateMachine.instance) {
+			StateMachine.instance = new StateMachine();
+		}
+		return StateMachine.instance;
+	}
+
+	private constructor() {
+		mc.system.runInterval(() => this.tick());
+
+		mc.world.afterEvents.playerSpawn.subscribe((event) => {
+			if (event.initialSpawn) {
+				this.playersManager.onPlayerJoinServer(event.player, { branches: this.branches, activeBranches: this.activeBranches });
+			} else {
+				this.playersManager.onPlayerRespawn(event.player, { branches: this.branches, activeBranches: this.activeBranches });
+			}
+		});
+
+		mc.world.beforeEvents.playerLeave.subscribe((event) => {
+			this.playersManager.onPlayerLeaveServer(event.player, { branches: this.branches, activeBranches: this.activeBranches });
+		});
+
+		mc.world.afterEvents.entityDie.subscribe(
+			(event) => {
+				this.playersManager.onPlayerDeath(event.deadEntity as mc.Player, { branches: this.branches, activeBranches: this.activeBranches });
+			},
+			{ entityTypes: ["minecraft:player"] }
+		);
+
+		mc.system.afterEvents.scriptEventReceive.subscribe((event) => {
+			if (event.id === RESET_EVENT) {
+				this.reset();
+			}
+		});
 	}
 
 	/**
-	 * Registers a function to call when the state machine ticks.
-	 * @param callback The function to call when the state machine ticks.
+	 * Debug function to display the branches' state in the action bar.
 	 */
-	onTick(callback: () => void) {
-		this.tickFunctions.push(callback);
+	private debugBranches() {
+		let data: { branch: string; level: string; state: string }[] = [];
+
+		let longestBranchName = 0;
+		let longestLevelName = 0;
+
+		this.branches.forEach((branch) => {
+			const level = branch.getActiveLevel();
+
+			data.push({
+				branch: branch.identifier,
+				level: level?.identifier ?? "No active levels",
+				state: branch.levelState,
+			});
+			longestBranchName = Math.max(longestBranchName, branch.identifier.length);
+			longestLevelName = Math.max(longestLevelName, level?.identifier.length ?? 0);
+		});
+
+		let formattedData = data.map((branch) => {
+			return `§a${branch.branch.padEnd(longestBranchName)}§r | §6${branch.level.padEnd(longestLevelName)}§r | §3${branch.state}§r`;
+		});
+		mc.world.getDimension(mc.MinecraftDimensionTypes.overworld).runCommand(`title @a actionbar ${formattedData.join("\n")}`);
+	}
+
+	/**
+	 * Resets the state machine.
+	 */
+	private reset() {
+		this.activeBranches.clear();
+		this.branches.forEach((branch) => {
+			branch.resetBranch();
+		});
+		this.defaultActiveBranches.forEach((branch) => {
+			this.activateBranch(branch);
+		});
+		this.playersManager.reset();
+		this.eventTrigger.triggerReset();
+	}
+
+	/**
+	 * Ticks the active branches.
+	 * If a branch has no active levels, it is deactivated.
+	 */
+	private tick() {
+		this.branches.forEach((branch) => {
+			if (!branch.getActiveLevel()) {
+				this.deactivateBranch(branch);
+			}
+			branch.tick();
+		});
+		this.playersManager.tick(this.activeBranches);
+		this.eventTrigger.triggerTick();
+		this.debugBranches();
 	}
 }
 
-export const stateMachine = new StateMachine();
+export const stateMachine = StateMachine.getInstance();
 export const mainBranch = stateMachine.createBranch("mainBranch", true);
-export const mainLevel0 = mainBranch.addLevel();
+export const mainLevel0 = mainBranch.addLevel("mainLevel0", true);

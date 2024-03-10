@@ -1,30 +1,30 @@
-import { PlayerObject, BranchObject } from "./Interfaces";
-import { SimpleDatabase, SimpleObject } from "../PropertyDatabase/Database";
+import { PlayerObject, BranchObject } from "./interfaces";
+import { SimpleDatabase } from "../PropertyDatabase/database";
 
-export class StateMachineDatabase extends SimpleDatabase {
-	constructor(name: string) {
-		super(name, undefined);
+export class BranchDatabase extends SimpleDatabase<BranchObject> {
+	protected static instance: BranchDatabase;
+	private constructor() {
+		super("branchDatabase", undefined);
 	}
 
-	addObject(object: BranchObject) {
-		super.addObject(object);
-	}
-
-	updateObject(object: BranchObject) {
-		super.updateObject(object);
+	static getInstance(): BranchDatabase {
+		if (!BranchDatabase.instance) {
+			BranchDatabase.instance = new BranchDatabase();
+		}
+		return BranchDatabase.instance;
 	}
 }
 
-export class PlayerDatabase extends SimpleDatabase {
-	constructor(name: string) {
-		super(name, undefined);
+export class PlayerDatabase extends SimpleDatabase<PlayerObject> {
+	protected static instance: PlayerDatabase;
+	private constructor() {
+		super("playerDatabase", undefined);
 	}
 
-	addObject(object: PlayerObject) {
-		super.addObject(object);
-	}
-
-	updateObject(object: PlayerObject) {
-		super.updateObject(object);
+	static getInstance(): PlayerDatabase {
+		if (!PlayerDatabase.instance) {
+			PlayerDatabase.instance = new PlayerDatabase();
+		}
+		return PlayerDatabase.instance;
 	}
 }
